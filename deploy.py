@@ -1,38 +1,57 @@
-import docker
+import os
 import time
+import docker
+from dotenv import load_dotenv
 
-def create_uptime_kuma():
-    # 1. Подключаемся к Docker-демону (использует стандартный сокет)
-    client = docker.from_env()
+# Загружаем переменные из .env (если файл есть)
+load_dotenv()
 
-    print("Проверяем наличие образа Uptime Kuma...")
-    # Опционально: можно заранее скачать образ, чтобы контейнер запустился быстрее
-    # client.images.pull('louislam/uptime-kuma:2')
+CONTAINER_NAME = os.getenv("CONTAINER_NAME", "uptime-kuma-auto")
+PORT = os.getenv("KUMA_PORT", "3001")
 
-    print("Создаем и запускаем контейнер...")
+
+def deploy_kuma():
+    print("🔄 Подключаемся к Docker...")
     try:
-        # 2. Запускаем контейнер. Это аналог команды docker run
+        client = docker.from_env()
+    except docker.errors.DockerException:
+        print("❌ Ошибка: Docker не запущен или не установлен на этом компьютере.")
+        return
+
+    # Проверяем, не запущен ли уже такой контейнер
+    try:
+        existing = client.containers.get(CONTAINER_NAME)
+        print(f"⚠️ Контейнер '{CONTAINER_NAME}' уже существует (статус: {existing.status}).")
+        print("Если хотите пересоздать его, удалите старый контейнер вручную.")
+        return
+    except docker.errors.NotFound:
+        pass  # Контейнера нет, идем дальше
+
+    print(f"🚀 Создаем и запускаем контейнер '{CONTAINER_NAME}'...")
+    try:
         container = client.containers.run(
             image='louislam/uptime-kuma:2',
-            name='uptime-kuma-auto',        # Имя контейнера
-            detach=True,                    # Запуск в фоновом режиме
-            restart_policy={"Name": "unless-stopped"}, # Автоперезапуск
-            ports={'3001/tcp': 3001},       # Проброс порта: хост:контейнер
+            name=CONTAINER_NAME,
+            detach=True,
+            restart_policy={"Name": "unless-stopped"},
+            ports={'3001/tcp': int(PORT)},
             volumes={
-                # Важный момент: persistent volume, чтобы данные не терялись при пересоздании
                 'uptime-kuma-data': {'bind': '/app/data', 'mode': 'rw'}
             }
         )
-        print(f"✅ Контейнер успешно запущен! ID: {container.short_id}")
-        print(f"🌐 Uptime Kuma доступна по адресу: http://localhost:3001")
-        
-        # Даем контейнеру пару секунд, чтобы он точно поднялся
+        print(f"✅ Успешно! ID контейнера: {container.short_id}")
+        print(f"🌐 Uptime Kuma доступна по адресу: http://localhost:{PORT}")
+
+        # Даем секунду на запуск и проверяем статус
         time.sleep(2)
         container.reload()
         print(f"📊 Текущий статус: {container.status}")
 
     except docker.errors.APIError as e:
-        print(f"❌ Ошибка при запуске контейнера: {e}")
+        print(f"❌ Ошибка Docker API: {e}")
+    except Exception as e:
+        print(f"❌ Неизвестная ошибка: {e}")
+
 
 if __name__ == "__main__":
-    create_uptime_kuma()
+    deploy_kuma()
